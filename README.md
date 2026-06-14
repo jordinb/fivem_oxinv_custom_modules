@@ -130,16 +130,6 @@ Module.Webhook = {
 }
 ```
 
-## Migration checklist
-
-- Remove/disable the old standalone `oxinv_custom_modules` and `oxinv_custom_modules` resources.
-- Replace old item exports:
-  - `oxinv_custom_modules.engraving_machine` -> `oxinv_custom_modules.engraving_machine`
-  - `exports.oxinv_custom_modules:labelItem(slot)` -> `exports.oxinv_custom_modules:labelItem(slot)`
-- Keep only one copy of the item/button snippets in `ox_inventory/data/items.lua`.
-- Copy the icon into `ox_inventory/web/images/engraving_machine.png`.
-- Restart `ox_inventory` after editing item definitions.
-
 ## File layout
 
 ```txt
