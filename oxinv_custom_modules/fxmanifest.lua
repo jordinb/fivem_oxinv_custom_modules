@@ -5,7 +5,7 @@ lua54 'yes'
 name 'oxinv_custom_modules'
 author 'Infamous Development Studios / Jordin B.'
 description 'Combined ox_inventory custom modules resource: engraving machine and item labeler.'
-version '1.0.0'
+version '1.0.1'
 
 shared_scripts {
     '@ox_lib/init.lua',

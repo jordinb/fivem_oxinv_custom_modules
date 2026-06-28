@@ -17,6 +17,11 @@ Module.MaxLength = 32
 -- If true, submitting a blank label clears metadata.label and restores the base item name.
 Module.AllowClear = true
 
+-- Requires the client to request a short-lived server session before metadata can be changed.
+-- This prevents direct TriggerServerEvent abuse from bypassing the normal label flow.
+Module.RequireServerSession = true
+Module.SessionTimeout = 45
+
 -- Client-side lock while the ox_lib input dialog is open.
 -- This prevents players from walking, attacking, using hotkeys, opening other UI, or interacting while naming an item.
 Module.DisableControlsDuringDialog = true
@@ -68,7 +73,8 @@ Module.AuditMetadataKeys = {
 Module.Webhook = {
     Enabled = false,
     Url = '',
-    Username = 'OX_Inventory Item Labeler',
+
+    Username = 'Item Label Logs',
     AvatarUrl = '',
     ColorApplied = 65280,
     ColorCleared = 16753920,
@@ -91,5 +97,6 @@ Module.Notifications = {
     blockedText = 'Label contains blocked text.',
     cleared = 'Item label cleared.',
     applied = 'Item labeled: %s',
-    dialogAlreadyOpen = 'A label dialog is already open.'
+    dialogAlreadyOpen = 'A label dialog is already open.',
+    invalidSession = 'Label request expired. Try again.'
 }

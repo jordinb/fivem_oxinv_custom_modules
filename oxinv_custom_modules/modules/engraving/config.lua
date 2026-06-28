@@ -99,6 +99,10 @@ Module.PendingTimeout = 45
 -- Cooldown for the engraving debug command, in seconds.
 -- Prevents repeated log spam in production.
 Module.DebugCooldown = 300
+Module.DebugCommand = {
+    Enabled = false,
+    AcePermission = 'engraving.debug'
+}
 
 -- Client-side safety timeout in milliseconds.
 -- Used only as a fallback for ox_inventory builds/forks that do not call the useItem callback when progress is cancelled.
@@ -120,4 +124,5 @@ Module.Notify = {
     failed = 'Engraving failed.',
     commandCooldown = 'Command is on cooldown. Try again in a few minutes.',
     noPermission = 'You do not have permission to overwrite engravings.',
+    noSpace = 'Not enough inventory space to separate that stack.',
 }

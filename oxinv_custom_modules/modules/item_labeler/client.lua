@@ -42,11 +42,11 @@ local function setInventoryBusy(state)
     pcall(function()
         if state then
             savedInvBusyState = LocalPlayer.state.invBusy
-            LocalPlayer.state:set('invBusy', true, true)
+            LocalPlayer.state:set('invBusy', true, false)
             return
         end
 
-        LocalPlayer.state:set('invBusy', savedInvBusyState == true, true)
+        LocalPlayer.state:set('invBusy', savedInvBusyState == true, false)
         savedInvBusyState = nil
     end)
 end
@@ -127,6 +127,12 @@ local function openLabelDialog(slot)
         return
     end
 
+    local ok, message, token = lib.callback.await('oxinv_custom_modules:item_labeler:prepare', false, slotId)
+    if not ok then
+        notify('error', message or Config.Notifications.invalidSlot)
+        return
+    end
+
     if not startDialogLock() then return end
 
     local input = lib.inputDialog('Label Item', {
@@ -144,7 +150,7 @@ local function openLabelDialog(slot)
 
     if not input then return end
 
-    TriggerServerEvent('oxinv_custom_modules:item_labeler:setLabel', slotId, input[1] or '')
+    TriggerServerEvent('oxinv_custom_modules:item_labeler:setLabel', slotId, input[1] or '', token)
 end
 
 RegisterNetEvent('oxinv_custom_modules:item_labeler:openLabelDialog', openLabelDialog)

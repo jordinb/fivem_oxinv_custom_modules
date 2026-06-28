@@ -24,15 +24,13 @@ local function cleanText(value)
 
     if #value < Config.MinLength then return nil end
 
-    if #value > Config.MaxLength then
-        value = value:sub(1, Config.MaxLength)
-    end
+    if #value > Config.MaxLength then return nil end
 
     return value
 end
 
 local function isBlockedItem(itemName)
-    return itemName and Config.BlockedItems[itemName] == true
+    return itemName and (Config.BlockedItems or {})[itemName] == true
 end
 
 local function copyValue(value, seen)
@@ -403,28 +401,53 @@ local function hasFullStackEngravePermission(source)
     return IsPlayerAceAllowed(source, Config.FullStackEngraveAcePermission or 'group.admin')
 end
 
-local function addInventoryItem(source, name, count, metadata)
-    if type(ox_inventory.AddItem) == 'function' then
-        return ox_inventory:AddItem(source, name, count, metadata)
-    end
+local function canCarryItem(source, name, count, metadata)
+    local success, result = pcall(function()
+        return ox_inventory:CanCarryItem(source, name, count, metadata)
+    end)
 
-    if type(ox_inventory.addItem) == 'function' then
-        return ox_inventory:addItem(source, name, count, metadata)
-    end
-
-    return false
+    return success and result == true
 end
 
-local function removeInventoryItem(source, name, count, metadata)
-    if type(ox_inventory.RemoveItem) == 'function' then
-        return ox_inventory:RemoveItem(source, name, count, metadata)
+local function addInventoryItem(source, name, count, metadata, slot)
+    local success, added, response = pcall(function()
+        return ox_inventory:AddItem(source, name, count, metadata, slot)
+    end)
+
+    if not success then
+        print(('^1[oxinv_custom_modules/engraving]^7 AddItem failed: %s'):format(added or 'unknown error'))
+        return false, added
     end
 
-    if type(ox_inventory.removeItem) == 'function' then
-        return ox_inventory:removeItem(source, name, count, metadata)
+    return added == true, response
+end
+
+local function removeInventoryItem(source, name, count, metadata, slot)
+    local success, removed, response = pcall(function()
+        return ox_inventory:RemoveItem(source, name, count, metadata, slot, false, true)
+    end)
+
+    if not success then
+        print(('^1[oxinv_custom_modules/engraving]^7 RemoveItem failed: %s'):format(removed or 'unknown error'))
+        return false, removed
     end
 
-    return false
+    return removed == true, response
+end
+
+local function preventMentions(value)
+    return tostring(value or ''):gsub('@', '@ ')
+end
+
+local function clip(value, maxLength)
+    value = tostring(value or '')
+    maxLength = maxLength or 1024
+
+    if #value <= maxLength then
+        return value
+    end
+
+    return value:sub(1, maxLength - 3) .. '...'
 end
 
 local function getIdentifierSummary(source)
@@ -466,18 +489,18 @@ local function sendWebhookLog(source, target, text, previousEngraving, metadata)
     if not webhook or webhook.Enabled ~= true or type(webhook.Url) ~= 'string' or webhook.Url == '' then return end
 
     local audit = getAudit(metadata)
-    local playerName = GetPlayerName(source) or ('ID %s'):format(source)
+    local playerName = preventMentions(GetPlayerName(source) or ('ID %s'):format(source))
     local itemLabel = getItemLabel(target)
     local fields = {
-        { name = 'Player', value = ('%s [%s]'):format(playerName, source), inline = false },
-        { name = 'Item', value = ('%s (`%s`)'):format(itemLabel, target.name), inline = true },
+        { name = 'Player', value = clip(('%s [%s]'):format(playerName, source), 1024), inline = false },
+        { name = 'Item', value = clip(('%s (`%s`)'):format(preventMentions(itemLabel), target.name), 1024), inline = true },
         { name = 'Slot', value = tostring(target.slot), inline = true },
-        { name = 'Engraving', value = tostring(text), inline = false },
+        { name = 'Engraving', value = clip(preventMentions(text), 1024), inline = false },
         { name = 'Engraved At', value = tostring(audit.at or 'Unknown'), inline = true },
     }
 
     if webhook.IncludePreviousEngraving ~= false and previousEngraving and previousEngraving ~= '' then
-        fields[#fields + 1] = { name = 'Previous Engraving', value = tostring(previousEngraving), inline = false }
+        fields[#fields + 1] = { name = 'Previous Engraving', value = clip(preventMentions(previousEngraving), 1024), inline = false }
     end
 
     local identifierSummary = getIdentifierSummary(source)
@@ -487,7 +510,7 @@ local function sendWebhookLog(source, target, text, previousEngraving, metadata)
 
     local payload = {
         username = webhook.Username or 'Engraving Machine Logs',
-        avatar_url = webhook.AvatarUrl or '',
+        avatar_url = webhook.AvatarUrl ~= '' and webhook.AvatarUrl or nil,
         embeds = {
             {
                 title = 'Item Engraved',
@@ -618,14 +641,21 @@ exports('engraving_machine', function(event, item, inventory, slot, data)
         metadata = syncEngravingMetadata(metadata, source, text)
 
         if isStack and not canEngraveStack then
-            local added = addInventoryItem(source, target.name, 1, metadata)
-            if not added then
+            if not canCarryItem(source, target.name, 1, metadata) then
+                notify(source, Config.Notify.noSpace or Config.Notify.failed, 'error')
+                return false
+            end
+
+            local removed = removeInventoryItem(source, target.name, 1, target.metadata, target.slot)
+            if not removed then
                 notify(source, Config.Notify.failed, 'error')
                 return false
             end
 
-            local removed = removeInventoryItem(source, target.name, 1, target.metadata)
-            if not removed then
+            local added = addInventoryItem(source, target.name, 1, metadata)
+            if not added then
+                -- Best-effort rollback so a failed metadata split does not delete the player's original item.
+                addInventoryItem(source, target.name, 1, target.metadata, target.slot)
                 notify(source, Config.Notify.failed, 'error')
                 return false
             end
@@ -643,8 +673,14 @@ exports('engraving_machine', function(event, item, inventory, slot, data)
 end)
 
 RegisterCommand('engravingdebug', function(source)
+    if not Config.DebugCommand or Config.DebugCommand.Enabled ~= true then return end
+
     if source <= 0 then
         return print('^3[oxinv_custom_modules/engraving]^7 /engravingdebug must be run in-game so it can inspect the caller inventory.')
+    end
+
+    if not IsPlayerAceAllowed(source, Config.DebugCommand.AcePermission or 'engraving.debug') then
+        return notify(source, Config.Notify.noPermission, 'error')
     end
 
     local now = os.time()

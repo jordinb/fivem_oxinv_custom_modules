@@ -3,6 +3,8 @@ if Config.Enabled == false then return end
 
 local ox_inventory = exports.ox_inventory
 local labelCooldown = {}
+local prepareCooldown = {}
+local labelSessions = {}
 
 local function notify(source, type, description)
     TriggerClientEvent('ox_lib:notify', source, {
@@ -99,6 +101,36 @@ local function isRateLimited(source)
 
     labelCooldown[source] = now
     return false
+end
+
+local function isPrepareRateLimited(source)
+    local now = os.time()
+
+    if prepareCooldown[source] and now - prepareCooldown[source] < 1 then
+        return true
+    end
+
+    prepareCooldown[source] = now
+    return false
+end
+
+local function createSessionToken(source, slot)
+    return ('%s:%s:%s:%s'):format(source, slot, os.time(), math.random(100000, 999999))
+end
+
+local function validateSession(source, slot, token)
+    if Config.RequireServerSession == false then
+        return true
+    end
+
+    local session = labelSessions[source]
+    if not session or session.slot ~= slot or session.token ~= token or os.time() > session.expires then
+        labelSessions[source] = nil
+        return false
+    end
+
+    labelSessions[source] = nil
+    return true
 end
 
 local function preventMentions(value)
@@ -267,6 +299,8 @@ local function sendWebhookLog(action, source, item, oldLabel, newLabel, reason)
     }
 
     PerformHttpRequest(webhook.Url, function(statusCode, responseText)
+        statusCode = tonumber(statusCode) or 0
+
         if statusCode < 200 or statusCode >= 300 then
             print(('[oxinv_custom_modules/item_labeler] Webhook failed with status %s: %s'):format(statusCode, responseText or ''))
         end
@@ -275,7 +309,41 @@ local function sendWebhookLog(action, source, item, oldLabel, newLabel, reason)
     })
 end
 
-RegisterNetEvent('oxinv_custom_modules:item_labeler:setLabel', function(slot, label)
+lib.callback.register('oxinv_custom_modules:item_labeler:prepare', function(source, slot)
+    if not Config.Enabled then return false, Config.Notifications.invalidSlot end
+    if isPrepareRateLimited(source) then return false, Config.Notifications.dialogAlreadyOpen end
+
+    slot = tonumber(slot)
+
+    if not slot then
+        return false, Config.Notifications.invalidSlot
+    end
+
+    local item = ox_inventory:GetSlot(source, slot)
+
+    if not item then
+        return false, Config.Notifications.missingItem
+    end
+
+    if not isItemAllowed(item.name) then
+        return false, Config.Notifications.notAllowed
+    end
+
+    if Config.RequireSingleItem and item.count and item.count > 1 then
+        return false, Config.Notifications.splitStack
+    end
+
+    local token = createSessionToken(source, slot)
+    labelSessions[source] = {
+        slot = slot,
+        token = token,
+        expires = os.time() + (tonumber(Config.SessionTimeout) or 45)
+    }
+
+    return true, nil, token
+end)
+
+RegisterNetEvent('oxinv_custom_modules:item_labeler:setLabel', function(slot, label, token)
     local source = source
 
     if not Config.Enabled then return end
@@ -286,6 +354,12 @@ RegisterNetEvent('oxinv_custom_modules:item_labeler:setLabel', function(slot, la
     if not slot then
         notify(source, 'error', Config.Notifications.invalidSlot)
         sendWebhookLog('rejected', source, nil, nil, nil, Config.Notifications.invalidSlot)
+        return
+    end
+
+    if not validateSession(source, slot, token) then
+        notify(source, 'error', Config.Notifications.invalidSession)
+        sendWebhookLog('rejected', source, nil, nil, nil, Config.Notifications.invalidSession)
         return
     end
 
@@ -350,4 +424,6 @@ end)
 
 AddEventHandler('playerDropped', function()
     labelCooldown[source] = nil
+    prepareCooldown[source] = nil
+    labelSessions[source] = nil
 end)
